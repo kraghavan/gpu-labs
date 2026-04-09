@@ -506,6 +506,48 @@
     margin-bottom: 0;
   }
 
+
+  /* ── SCREENSHOTS ── */
+  .screenshot-block {
+    margin: 2rem 0;
+  }
+
+  .screenshot-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.65rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin-bottom: 0.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  .screenshot-label::before {
+    content: '';
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    background: var(--accent);
+    border-radius: 50%;
+  }
+
+  .screenshot-block img {
+    width: 100%;
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    display: block;
+  }
+
+  .screenshot-caption {
+    font-size: 0.8rem;
+    color: var(--ink-faint);
+    font-style: italic;
+    margin-top: 0.6rem;
+    line-height: 1.5;
+  }
+
   /* ── RESPONSIVE ── */
   @media (max-width: 600px) {
     html { font-size: 16px; }
@@ -832,6 +874,16 @@ chat(<span class="t-string">"What is 4+4?"</span>,   <span class="t-string">"Thi
   whoever submitted the long document.
 </p>
 
+<div class="screenshot-block">
+  <div class="screenshot-label">Grafana live — E2E latency, inter-token latency, queue time during locust run</div>
+  <img src="media/locust-test-2.png" alt="Grafana dashboard showing E2E request latency P99/P95/P90/P50, queue time, inter-token latency, and token generation rate during the Locust load test">
+  <p class="screenshot-caption">
+    E2E latency (top left) showing P99 touching 1 minute during load spikes. Queue Time (top right)
+    shows request wait time climbing to 0.25s as concurrency increases. Inter Token Latency (bottom left)
+    starts high then stabilises as the batch warms — classic continuous batching behaviour.
+  </p>
+</div>
+
 <blockquote>
   <p>The queue is the bottleneck, not the GPU. The GPU is fast. The waiting is what kills latency.</p>
   <cite>— what Grafana's num_requests_waiting panel told me</cite>
@@ -932,6 +984,18 @@ chat(<span class="t-string">"What is 4+4?"</span>,   <span class="t-string">"Thi
   corresponded directly to TTFT degradation in the TTFT panel.
 </p>
 
+<div class="screenshot-block">
+  <div class="screenshot-label">Grafana live — scheduler state, token throughput, TTFT, cache utilisation</div>
+  <img src="media/locust-test-1.png" alt="Grafana dashboard showing token throughput, scheduler state (num running vs num waiting), TTFT over 2 minutes, and cache utilisation during the locust load test">
+  <p class="screenshot-caption">
+    Top right: Token Throughput spikes to ~80 tokens/sec during the locust run then subsides.
+    Middle right: Scheduler State — green spikes are <code>num_running</code>, yellow are <code>num_waiting</code>.
+    Queue depth briefly reaches 5 before draining. Bottom left: TTFT climbs during load, then
+    recovers as the queue clears. Bottom right: Cache Utilisation peaks at ~4% — plenty of headroom
+    on a 0.6B model.
+  </p>
+</div>
+
 <h3>Requests Prefill and Decode Time</h3>
 
 <p>
@@ -942,6 +1006,18 @@ chat(<span class="t-string">"What is 4+4?"</span>,   <span class="t-string">"Thi
   disaggregated setup, these two lines would come from separate pod pools —
   each independently scalable.
 </p>
+
+<div class="screenshot-block">
+  <div class="screenshot-label">Grafana live — TTFT latency percentiles and prefill vs decode time separated</div>
+  <img src="media/locust-test-3.png" alt="Grafana dashboard showing Time To First Token latency by percentile (P99/P95/P90/P50), finish reason breakdown, request prompt length distribution, and the Requests Prefill and Decode Time panel showing prefill and decode as separate metrics">
+  <p class="screenshot-caption">
+    Top left: TTFT percentiles — P99 spikes to 7s under load while P50 stays under 2s, showing
+    tail latency sensitivity to queue depth. Bottom right (highlighted): <strong>Requests Prefill
+    and Decode Time</strong> — the green line is prefill time, yellow is decode time. Prefill varies
+    with prompt length; decode stays flat. This is the visual proof of the two-phase separation.
+    In a P/D disaggregated deployment, these two lines come from separate pod pools.
+  </p>
+</div>
 
 <h3>Cache Utilisation</h3>
 
