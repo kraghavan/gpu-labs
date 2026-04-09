@@ -146,7 +146,7 @@ Each chunk = one decoded token being returned. This is TPOT visible to the naked
 ### Step 2.2 — Measure TTFT and TPOT Manually
 
 ```python
-# save as ~/labs/measure_latency.py
+# save as scripts/measure_latency.py
 import time
 import httpx
 import json
@@ -205,7 +205,7 @@ measure_streaming(long_prompt, max_tokens=50)
 
 ```bash
 pip install httpx   # if not already installed
-python ~/labs/measure_latency.py
+python3 scripts/measure_latency.py
 ```
 
 **What you should see:** TTFT is higher for the long prompt (more prefill work),
@@ -215,7 +215,7 @@ This is the core insight that motivates P/D disaggregation.
 ### Step 2.3 — Prefix Cache in Action
 
 ```python
-# save as ~/labs/prefix_cache_test.py
+# save as scripts/prefix_cache_test.py
 import time, httpx, json
 
 MODEL = "mlx-community/Qwen3-0.6B-4bit"
@@ -251,17 +251,17 @@ chat("What is 4+4?", "Third request (warmer cache)")
 ```
 
 ```bash
-python ~/labs/prefix_cache_test.py
+python3 scripts/prefix_cache_test.py
 ```
 
-**Expected:** TTFT drops significantly on the 2nd and 3rd requests because the
-system prompt tokens are already in the KV cache. This is prefix caching — one of
-the key features llm-d's scheduler routes around.
+**Expected:** TTFT drops ~50% on the 2nd request because the system prompt tokens
+are already in the KV cache. This is prefix caching — one of the key features
+llm-d's EPP scheduler routes around.
 
 ### Day 2 Checkpoint ✅
 - [ ] Observed streaming tokens arriving
 - [ ] Measured TTFT vs TPOT difference between short/long prompts
-- [ ] Observed prefix cache speedup
+- [ ] Observed prefix cache speedup (~50% TTFT reduction on warm requests)
 
 ---
 
@@ -280,25 +280,28 @@ curl http://localhost:8000/metrics | grep "^vllm" | head -30
 ```
 vllm:num_requests_running      # inflight requests right now
 vllm:num_requests_waiting      # queued requests
-vllm:kv_cache_usage_perc      # KV cache utilization (0–1)
+vllm:kv_cache_usage_perc       # KV cache utilization (0–1)
+                               # Note: this is kv_cache not gpu_cache
 vllm:time_to_first_token_seconds_bucket   # TTFT histogram
 vllm:time_per_output_token_seconds_bucket # TPOT histogram
+vllm:prefix_cache_hits_total   # cumulative prefix cache hits
+vllm:prefix_cache_queries_total # total cache lookups
 ```
 
-> **Note:** vllm-metal pins vLLM 0.13.0. Some newer metric names may differ
-> slightly from the latest vLLM docs. Use `curl .../metrics | grep vllm` to
-> see exactly what's available on your install.
+> **Note:** The official vLLM Grafana dashboard references `gpu_cache_usage_perc`
+> but vllm-metal exposes `kv_cache_usage_perc`. Fix that panel query in Grafana
+> after import.
 
 ### Step 3.2 — Docker Compose for Prometheus + Grafana
 
 ```bash
-mkdir -p ~/labs/observability
-cd ~/labs/observability
+mkdir -p labs/observability
+cd labs/observability
 ```
 
 **Create `prometheus.yml`:**
 ```yaml
-# ~/labs/observability/prometheus.yml
+# labs/observability/prometheus.yml
 global:
   scrape_interval: 5s
 
@@ -311,7 +314,7 @@ scrape_configs:
 
 **Create `docker-compose.yml`:**
 ```yaml
-# ~/labs/observability/docker-compose.yml
+# labs/observability/docker-compose.yml
 version: "3"
 services:
   prometheus:
@@ -335,7 +338,7 @@ services:
 ```
 
 ```bash
-cd ~/labs/observability
+cd labs/observability
 docker compose up -d
 
 # Verify both are running
@@ -352,14 +355,15 @@ docker compose ps
 ### Step 3.4 — Import the Official vLLM Dashboard
 
 ```bash
-curl -o ~/labs/observability/vllm-dashboard.json \
+curl -o labs/observability/vllm-dashboard.json \
   https://raw.githubusercontent.com/vllm-project/vllm/main/examples/online_serving/prometheus_grafana/grafana.json
 ```
 
 In Grafana: **Dashboards → Import → Upload JSON file** → select `vllm-dashboard.json`
 Select your Prometheus datasource. Click **Import**.
 
-You now have: E2E latency, TTFT, TPOT, queue depth, KV cache utilization — all live.
+**Fix the KV cache panel:** find the `gpu_cache_usage_perc` panel, edit its query to
+`vllm:kv_cache_usage_perc` — this is what vllm-metal actually exposes.
 
 ### Step 3.5 — Generate Some Traffic to See Data
 
@@ -382,6 +386,7 @@ Watch the Grafana dashboard update as the 20 requests process.
 - [ ] `/metrics` endpoint returning vllm-prefixed metrics
 - [ ] Prometheus scraping successfully (check http://localhost:9090/targets)
 - [ ] Grafana dashboard showing live data
+- [ ] Fixed `gpu_cache_usage_perc` → `kv_cache_usage_perc` panel query
 
 ---
 
@@ -390,7 +395,7 @@ Watch the Grafana dashboard update as the 20 requests process.
 ### Step 4.1 — Write the Locust Test
 
 ```python
-# save as ~/labs/locustfile.py
+# save as scripts/locust.py
 import random
 from locust import HttpUser, task, between
 
@@ -438,7 +443,7 @@ source ~/.venv-vllm-metal/bin/activate
 vllm serve mlx-community/Qwen3-0.6B-4bit --port 8000
 
 # Terminal 2: run Locust
-locust -f ~/labs/locustfile.py --host http://localhost:8000
+locust -f scripts/locust.py --host http://localhost:8000
 
 # Open http://localhost:8089
 # Start with: 5 users, spawn rate 1/s
@@ -474,7 +479,7 @@ histogram_quantile(0.95, rate(vllm:time_per_output_token_seconds_bucket[2m]))
 # Queue saturation ratio
 vllm:num_requests_waiting / (vllm:num_requests_running + 1)
 
-# KV cache pressure
+# KV cache pressure (vllm-metal metric name)
 vllm:kv_cache_usage_perc
 ```
 
@@ -505,7 +510,7 @@ Run your Locust test again. Then change `--max-num-seqs 4` and compare:
 ### Step 5.2 — Simulate KV Cache Pressure
 
 ```python
-# save as ~/labs/kv_pressure.py
+# save as scripts/kv_pressure.py
 import httpx, concurrent.futures, time
 
 def send_long_request(i):
@@ -522,9 +527,13 @@ def send_long_request(i):
     print(f"Request {i}: {tokens} tokens in {elapsed:.1f}s ({tokens/elapsed:.1f} tok/s)")
     return elapsed
 
+# 4 concurrent long requests — watch continuous batching run them in parallel
 with concurrent.futures.ThreadPoolExecutor(max_workers=4) as ex:
     futures = [ex.submit(send_long_request, i) for i in range(4)]
     results = [f.result() for f in futures]
+
+# All 4 complete at roughly the same time = continuous batching working
+# Sequential would be ~4x the time of a single request
 ```
 
 Watch `vllm:kv_cache_usage_perc` in Grafana climb during this test.
@@ -532,7 +541,7 @@ Watch `vllm:kv_cache_usage_perc` in Grafana climb during this test.
 ### Step 5.3 — Compare Ollama vs vllm-metal
 
 ```bash
-# Ollama load test
+# Ollama load test (must have ollama running: ollama serve)
 echo '{"model":"mistral","messages":[{"role":"user","content":"What is 2+2?"}]}' > /tmp/ollama_body.json
 
 vegeta attack -rate=3/s -duration=30s \
@@ -553,12 +562,44 @@ Ollama processes requests sequentially. vllm-metal batches them — the gap wide
 
 ### Day 5 Checkpoint ✅
 - [ ] Observed KV cache pressure in Grafana under long-output load
-- [ ] Compared `--max-num-seqs` settings and their throughput/latency tradeoff
-- [ ] Benchmarked Ollama vs vllm-metal under concurrent load
+- [ ] All 4 kv_pressure requests completed simultaneously (continuous batching confirmed)
+- [ ] Benchmarked Ollama vs vllm-metal — noted p50/p95 difference
 
 ---
 
-## Day 6 — kind Cluster + vLLM Behind a Service
+## Day 6 — kind Cluster + nginx Reverse Proxy to vLLM
+
+### Architecture Explanation First
+
+**This is critical to understand before touching any YAML.**
+
+On Apple Silicon, Metal GPU cannot be passed through to Docker containers.
+This means vllm-metal **must run natively on the Mac host** — it cannot run inside
+a kind pod.
+
+So our local topology is:
+
+```
+curl localhost:9000                    (your Mac)
+  → kind NodePort 30000               (kind routes into the cluster)
+  → nginx pod port 80                 (proxy pod inside kind)
+  → host.docker.internal:8000         (vllm-metal back on the Mac host)
+```
+
+This is an **artificial two-hop** that exists only because of Metal GPU limitations.
+
+**In production (Week 2 with real GPU), the topology is clean and single-hop:**
+
+```
+curl gateway:80
+  → Envoy gateway pod                 (load balancing, KV-cache-aware routing)
+  → vLLM pod                          (FastAPI/uvicorn server running INSIDE
+                                       the pod with direct GPU access)
+```
+
+vLLM runs a FastAPI server inside each pod — Envoy sits in front of it.
+The nginx pod we deploy locally is simulating where Envoy sits in llm-d.
+The routing lesson is identical; only the backend location differs.
 
 ### Step 6.1 — Create a kind Cluster
 
@@ -569,7 +610,7 @@ apiVersion: kind.x-k8s.io/v1alpha4
 nodes:
   - role: control-plane
     extraPortMappings:
-      - containerPort: 30000
+      - containerPort: 30000   # maps to host port 9000
         hostPort: 9000
       - containerPort: 30001
         hostPort: 9091
@@ -579,12 +620,56 @@ kind create cluster --name vllm-lab --config labs/kind-config.yaml
 kubectl cluster-info --context kind-vllm-lab
 ```
 
-### Step 6.2 — Deploy a vLLM Proxy Pod
+### Step 6.2 — Deploy nginx as a Reverse Proxy to vllm-metal
+
+This is a **working proxy** — requests entering the cluster on port 9000 are
+forwarded to vllm-metal running on your Mac at port 8000.
+
+> **IPv6 gotcha on Apple Silicon:** `host.docker.internal` inside kind resolves
+> to an IPv6 address, but vllm-metal only listens on IPv4. nginx will log
+> `connect() failed (101: Network unreachable)` and the proxy silently fails.
+> **Fix: use the kind bridge gateway IP directly.**
 
 ```bash
-# vllm-metal runs natively on Metal (no GPU passthrough in containers)
-# We deploy a proxy pod to simulate the K8s gateway pattern
+# Step 1: find the host IP as seen from inside kind (do this first)
+HOST_IP=$(docker inspect vllm-lab-control-plane \
+  --format '{{range .NetworkSettings.Networks}}{{.Gateway}}{{end}}')
+echo "Host IP: $HOST_IP"
+# Expected: 172.19.0.1  (may vary — use whatever this prints)
+```
+
+```bash
+# Step 2: write the manifest using the real IP, not host.docker.internal
+# Replace 172.19.0.1 below with your HOST_IP value if it differs
 cat <<EOF > labs/nginx-vllm.yaml
+# ConfigMap: nginx reverse proxy config
+# Forwards all traffic to vllm-metal on the Mac host via IPv4
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-vllm-config
+  namespace: default
+data:
+  default.conf: |
+    server {
+        listen 80;
+
+        # Use kind bridge gateway IP directly — avoids IPv6 resolution issue
+        # with host.docker.internal on Apple Silicon + kind.
+        location / {
+            proxy_pass http://172.19.0.1:8000;
+            proxy_set_header Host \$host;
+            proxy_set_header X-Real-IP \$remote_addr;
+            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+
+            # vLLM requests can take tens of seconds — set generous timeouts
+            proxy_read_timeout    300s;
+            proxy_connect_timeout  10s;
+            proxy_send_timeout    300s;
+        }
+    }
+---
+# Deployment: nginx pod mounting the config above
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -601,15 +686,25 @@ spec:
         app: vllm
     spec:
       containers:
-        - name: proxy
+        - name: nginx
           image: nginx:alpine
           ports:
             - containerPort: 80
+          volumeMounts:
+            - name: nginx-config
+              mountPath: /etc/nginx/conf.d   # overrides nginx default config
+      volumes:
+        - name: nginx-config
+          configMap:
+            name: nginx-vllm-config
 ---
+# Service: NodePort exposes nginx pod on cluster port 30000
+# kind maps host port 9000 → cluster port 30000 (via kind-config.yaml above)
 apiVersion: v1
 kind: Service
 metadata:
   name: vllm-service
+  namespace: default
 spec:
   type: NodePort
   selector:
@@ -619,9 +714,52 @@ spec:
       targetPort: 80
       nodePort: 30000
 EOF
+
+# Apply everything
+kubectl apply -f labs/nginx-vllm.yaml
+
+# Wait for pod to be Running
+kubectl get pods -w
+# Expected: vllm-proxy-xxxx   1/1   Running
 ```
 
-### Step 6.3 — Use k9s to Explore
+### Step 6.3 — Verify the Full Request Path
+
+Make sure vllm-metal is running on port 8000 first, then:
+
+```bash
+# Step 1: verify nginx pod is healthy
+kubectl get pods
+kubectl logs deploy/vllm-proxy   # should show nginx startup, no errors
+
+# Step 2: hit the models endpoint through the full K8s path
+# localhost:9000 → kind → nginx pod → host vllm-metal
+curl http://localhost:9000/v1/models | jq .
+
+# Expected: same response as hitting localhost:8000 directly
+# {"object":"list","data":[{"id":"mlx-community/Qwen3-0.6B-4bit",...}]}
+
+# Step 3: full inference request through the gateway
+curl -s http://localhost:9000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "mlx-community/Qwen3-0.6B-4bit",
+    "messages": [{"role": "user", "content": "What is KV cache?"}],
+    "max_tokens": 50
+  }' | jq .choices[0].message.content
+
+# Step 4: load test through the gateway (not localhost:8000 directly)
+echo '{"model":"mlx-community/Qwen3-0.6B-4bit","messages":[{"role":"user","content":"What is 2+2?"}],"max_tokens":20}' > /tmp/vllm_gateway.json
+
+vegeta attack -rate=3/s -duration=15s \
+  -targets=<(echo "POST http://localhost:9000/v1/chat/completions
+Content-Type: application/json
+@/tmp/vllm_gateway.json") | vegeta report
+
+# Compare p50/p95 here vs direct localhost:8000 — gateway adds ~1-2ms overhead
+```
+
+### Step 6.4 — Explore with k9s
 
 ```bash
 k9s --context kind-vllm-lab
@@ -630,33 +768,69 @@ k9s --context kind-vllm-lab
 **Keyboard shortcuts in k9s:**
 - `:pods` — list all pods
 - `:svc` — list services
-- `d` on a pod — describe it
-- `l` on a pod — tail logs
-- `ctrl+k` — kill a pod (watch it restart)
+- `:cm` — list ConfigMaps (see your nginx-vllm-config here)
+- `d` on a resource — describe it
+- `l` on a pod — tail logs (watch nginx access logs as you send requests)
+- `ctrl+k` — kill a pod (watch it restart — K8s self-healing)
 
-### Step 6.4 — K8s Topology Mental Model
-
+**What to look for in nginx logs:**
 ```
-[your request]
-     │
-     ▼
-[K8s Service: vllm-service:80]   ← In llm-d: Inference Gateway (Envoy)
-     │
-     ▼
-[K8s Pod: vllm-worker-1]          ← In llm-d: vLLM pod (prefill or decode)
-[K8s Pod: vllm-worker-2]
+# In k9s, press 'l' on the vllm-proxy pod
+# You should see lines like:
+10.244.0.1 - - "POST /v1/chat/completions HTTP/1.1" 200 ...
+# 200 = nginx successfully proxied to vllm-metal and got a response
 ```
 
-On cloud GPU next week, each pod is a real vLLM process.
-The EPP (Endpoint Picker Plugin) replaces generic K8s load balancing
-with KV-cache-aware, TTFT-aware smart routing.
+### Step 6.5 — The Topology Pattern
+
+```
+Local setup (Apple Silicon constraint):
+
+  curl localhost:9000
+       │
+       ▼ host port 9000
+  kind NodePort 30000
+       │
+       ▼ inside cluster
+  nginx pod :80  (simulates Envoy position in llm-d)
+       │
+       ▼ proxy_pass http://172.19.0.1:8000
+  Mac host IPv4 address (kind bridge gateway)
+       │
+       ▼ native on Mac
+  vllm-metal (Metal GPU)
+
+  Note: host.docker.internal resolves to IPv6 inside kind on Apple Silicon —
+  use the bridge gateway IP from: docker inspect vllm-lab-control-plane
+
+Production (Week 2 — real GPU):
+
+  curl gateway:80
+       │
+       ▼
+  Envoy gateway pod  (EPP does KV-cache-aware routing here)
+       │
+       ▼ routes to selected pod
+  vLLM pod  (FastAPI server + real GPU inside the pod)
+```
+
+The only difference between local and production: in production, vLLM is
+**inside the pod** with direct GPU access. The gateway layer (nginx here,
+Envoy in production) sits in exactly the same position in both topologies.
 
 ### Day 6 Checkpoint ✅
-- [ ] kind cluster running
-- [ ] k9s navigation comfortable
-- [ ] Mental model of how local vllm-metal maps to K8s pod topology
+- [ ] kind cluster running with NodePort 9000→30000 mapping
+- [ ] Host IP obtained: `docker inspect vllm-lab-control-plane --format '{{range .NetworkSettings.Networks}}{{.Gateway}}{{end}}'`
+- [ ] nginx ConfigMap deployed with `proxy_pass http://<HOST_IP>:8000` (not host.docker.internal)
+- [ ] `curl http://localhost:9000/v1/models` returns model list
+- [ ] Full inference request works through the gateway path
+- [ ] nginx pod logs show `200` status codes (not `404` or `Network unreachable`)
+- [ ] k9s navigation: can see pods, services, ConfigMaps, tail logs
 
-vegeta attack -rate=10/s -duration=10s -targets=<(echo "GET http://localhost:9000/") | vegeta report
+> **If you see `connect() failed (101: Network unreachable)` in nginx logs:**
+> `host.docker.internal` resolved to IPv6. Re-apply the ConfigMap with
+> `proxy_pass http://172.19.0.1:8000` (your HOST_IP) and
+> `kubectl rollout restart deployment/vllm-proxy`.
 
 ---
 
@@ -675,7 +849,7 @@ Create a single "vLLM Learning" dashboard with 6 panels:
 | TPOT p50/p95 | `histogram_quantile(0.95, rate(vllm:time_per_output_token_seconds_bucket[2m]))` | Time series |
 | Token Throughput | `rate(vllm:generation_tokens_total[1m])` | Time series |
 
-Export as JSON → `~/labs/observability/my-vllm-dashboard.json`
+Export as JSON → `labs/observability/my-vllm-dashboard.json`
 
 ### Step 7.2 — Record Your Benchmark Numbers
 
@@ -683,34 +857,42 @@ Export as JSON → `~/labs/observability/my-vllm-dashboard.json`
 Model: Qwen3-0.6B-4bit on M4 Mac Mini 16GB (vllm-metal)
 
 Baseline (single request):
-  TTFT (short prompt ~20 tokens): ___ms
-  TTFT (long prompt ~500 tokens): ___ms
-  TPOT: ___ms
-  Throughput: ___ tok/s
+  TTFT short prompt (~20 tokens): 341.8ms
+  TTFT long prompt (~500 tokens): 487.3ms
+  TPOT short:                      3.4ms
+  TPOT long:                       4.2ms
+  Throughput:                      145.8 tok/s
 
-Under load (10 concurrent users):
-  TTFT p95: ___ms
-  TPOT p95: ___ms
-  Max queue depth seen: ___
-  KV cache peak: ___%
+Prefix cache:
+  Cold TTFT:   753ms
+  Warm TTFT:   367ms  (51% reduction)
 
-Ollama vs vllm-metal (3 req/s, 30s):
-  Ollama p95: ___ms
-  vllm-metal p95: ___ms
-  vllm-metal throughput advantage: ___x
+KV pressure (4 concurrent, 500 tokens each):
+  All completed simultaneously: ~24.9s  (continuous batching confirmed)
+  Per-request throughput:       20.1 tok/s
+
+Under concurrent load (5 users, Locust):
+  short_prompt p50:   1,900ms
+  long_prompt p50:   31,000ms  ← the P/D disaggregation motivation
+
+Ollama vs vllm-metal (3 req/s, 30s, similar model size):
+  Ollama/qwen2.5:0.5b p50:   14,062ms
+  vllm-metal/Qwen3-0.6B p50:  6,543ms
+  vllm-metal advantage:        2.15x faster at p50
 ```
 
 ### Step 7.3 — Connect This Week to Week 2
 
 ```
 Week 1 (what you observed):
-  Short prompt → low TTFT   ✓ good
-  Long prompt  → high TTFT  ✗ bad — prefill blocks decode queue
+  Short prompt → TTFT 341ms  ✓ good
+  Long prompt  → TTFT 487ms  ← prefill work visible even on 0.6B model
+  Under load   → long_prompt p50 = 31,000ms  ✗ queuing kills TTFT
 
 Week 2 (what llm-d solves):
-  Long prompt → prefill pod handles it in parallel
-              → decode pod is never blocked
-              → TTFT stays low for ALL request types
+  Long prompt → dedicated prefill pod handles prompt processing
+              → decode pod never blocked by prefill queue
+              → TTFT stays low for ALL request types under load
 ```
 
 ---
@@ -728,23 +910,28 @@ vllm serve mlx-community/Qwen3-0.6B-4bit --port 8000
 vllm serve mlx-community/Qwen3-0.6B-4bit --port 8000 --max-num-seqs 8
 
 # Prometheus + Grafana
-cd ~/labs/observability && docker compose up -d
-cd ~/labs/observability && docker compose down
+cd labs/observability && docker compose up -d
+cd labs/observability && docker compose down
 
 # kind cluster
-kind create cluster --name vllm-lab --config ~/labs/kind-config.yaml
+kind create cluster --name vllm-lab --config labs/kind-config.yaml
 kind delete cluster --name vllm-lab
+
+# nginx proxy (after cluster is up)
+kubectl apply -f labs/nginx-vllm.yaml
+kubectl delete -f labs/nginx-vllm.yaml
 ```
 
 ### Key URLs
 
-| Service | URL |
-|---|---|
-| vllm-metal API | http://localhost:8000/v1 |
-| vllm-metal Metrics | http://localhost:8000/metrics |
-| Prometheus | http://localhost:9090 |
-| Grafana | http://localhost:3000 |
-| Locust UI | http://localhost:8089 |
+| Service | URL | Notes |
+|---|---|---|
+| vllm-metal direct | http://localhost:8000/v1 | Bypass gateway |
+| vllm-metal via K8s | http://localhost:9000/v1 | Through nginx proxy |
+| vllm-metal Metrics | http://localhost:8000/metrics | Prometheus scrape |
+| Prometheus | http://localhost:9090 | |
+| Grafana | http://localhost:3000 | |
+| Locust UI | http://localhost:8089 | |
 
 ### Important Metrics at a Glance
 
@@ -752,7 +939,7 @@ kind delete cluster --name vllm-lab
 |---|---|---|---|
 | `num_requests_waiting` | 0 | 1–5 | > 10 |
 | `vllm:kv_cache_usage_perc` | < 0.7 | 0.7–0.9 | > 0.9 |
-| TTFT p95 | < 200ms | 200–500ms | > 500ms |
+| TTFT p95 | < 500ms | 500ms–2s | > 2s |
 | TPOT p95 | < 50ms | 50–100ms | > 100ms |
 
 ### Known Issues / Notes
@@ -760,8 +947,10 @@ kind delete cluster --name vllm-lab
 | Issue | Explanation |
 |---|---|
 | `Triton not installed` warning | Harmless — Metal replaces Triton on Apple Silicon |
-| vllm-mlx NoneType error | vllm-mlx is broken with mlx-lm>=0.31.0 — use vllm-metal instead |
-| `vllm-mlx: command not found` | Correct — we use `vllm` not `vllm-mlx` |
+| `gpu_cache_usage_perc` shows no data | Fix panel query to `vllm:kv_cache_usage_perc` |
+| vllm-mlx NoneType error | vllm-mlx broken with mlx-lm>=0.31.0 — use vllm-metal |
+| nginx `Network unreachable` error | `host.docker.internal` resolved to IPv6 inside kind — use bridge IP: `docker inspect vllm-lab-control-plane --format '{{range .NetworkSettings.Networks}}{{.Gateway}}{{end}}'` then set `proxy_pass http://<IP>:8000` |
+| nginx 404 on `/v1/chat/completions` | ConfigMap missing or not mounted — apply labs/nginx-vllm.yaml and restart pod |
 | Model re-downloads on serve | Pre-download via `huggingface-cli download <model>` first |
 
 ---
@@ -770,9 +959,9 @@ kind delete cluster --name vllm-lab
 
 What you'll build:
 1. Single GPU node: llm-d quickstart with prefix-cache routing (K3s + Helm)
-2. Two GPU nodes: P/D disaggregation — prefill pool + decode pool separated
-3. Load test both configurations and compare TTFT histograms in Grafana
-4. Scale decode pool independently while prefill pool stays fixed — watch TPOT improve
-5. Observe EPP scheduler routing decisions in logs
+2. P/D disaggregation — prefill pool + decode pool on separate GPU pods
+3. Load test both configurations — compare TTFT histograms in Grafana
+4. Scale decode pool independently — watch TPOT improve
+5. Read EPP scheduler routing decisions in logs
 
 Estimated cloud cost: ~$15–20 total on Vultr L40S ($250 free credit covers it entirely).

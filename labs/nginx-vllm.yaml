@@ -1,0 +1,71 @@
+# ConfigMap: nginx reverse proxy config
+# Forwards all traffic to vllm-metal on the Mac host
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-vllm-config
+  namespace: default
+data:
+  default.conf: |
+    server {
+        listen 80;
+
+        # Forward all requests to vllm-metal running on Mac host.
+        # host.docker.internal resolves to the Mac host IP from inside kind.
+        location / {
+            proxy_pass http://host.docker.internal:8000;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+            # vLLM requests can take tens of seconds — set generous timeouts
+            proxy_read_timeout    300s;
+            proxy_connect_timeout  10s;
+            proxy_send_timeout    300s;
+        }
+    }
+---
+# Deployment: nginx pod mounting the config above
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-proxy
+  namespace: default
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vllm
+  template:
+    metadata:
+      labels:
+        app: vllm
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:alpine
+          ports:
+            - containerPort: 80
+          volumeMounts:
+            - name: nginx-config
+              mountPath: /etc/nginx/conf.d   # overrides nginx default config
+      volumes:
+        - name: nginx-config
+          configMap:
+            name: nginx-vllm-config
+---
+# Service: NodePort exposes nginx pod on cluster port 30000
+# kind maps host port 9000 → cluster port 30000 (via kind-config.yaml above)
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-service
+  namespace: default
+spec:
+  type: NodePort
+  selector:
+    app: vllm
+  ports:
+    - port: 80
+      targetPort: 80
+      nodePort: 30000

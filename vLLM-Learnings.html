@@ -1,0 +1,1165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Measuring LLM Inference From First Principles — Week 1 Lab Notes</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:ital,wght@0,400;0,600;1,400&family=Playfair+Display:ital,wght@0,700;1,400&family=Source+Serif+4:ital,opsz,wght@0,8..60,300;0,8..60,400;0,8..60,600;1,8..60,300&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink: #1a1a1a;
+    --ink-light: #4a4a4a;
+    --ink-faint: #8a8a8a;
+    --paper: #f7f4ef;
+    --paper-warm: #efe9de;
+    --accent: #c0392b;
+    --accent-soft: #e8d5d3;
+    --code-bg: #1e1e2e;
+    --code-fg: #cdd6f4;
+    --code-green: #a6e3a1;
+    --code-yellow: #f9e2af;
+    --code-red: #f38ba8;
+    --code-blue: #89b4fa;
+    --code-comment: #6c7086;
+    --rule: #d4cfc8;
+    --highlight: #fff3cd;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html { font-size: 18px; }
+
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: 'Source Serif 4', Georgia, serif;
+    font-weight: 300;
+    line-height: 1.8;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* ── HEADER ── */
+  header {
+    border-bottom: 3px solid var(--ink);
+    padding: 3rem 0 2rem;
+    margin-bottom: 0;
+  }
+
+  .header-inner {
+    max-width: 740px;
+    margin: 0 auto;
+    padding: 0 2rem;
+  }
+
+  .series-tag {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.65rem;
+    font-weight: 600;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--accent);
+    border: 1.5px solid var(--accent);
+    display: inline-block;
+    padding: 0.2rem 0.6rem;
+    margin-bottom: 1.5rem;
+  }
+
+  h1 {
+    font-family: 'Playfair Display', serif;
+    font-weight: 700;
+    font-size: 2.8rem;
+    line-height: 1.15;
+    letter-spacing: -0.02em;
+    color: var(--ink);
+    margin-bottom: 1rem;
+  }
+
+  .subtitle {
+    font-size: 1.1rem;
+    font-weight: 300;
+    font-style: italic;
+    color: var(--ink-light);
+    margin-bottom: 2rem;
+    line-height: 1.6;
+  }
+
+  .byline {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding-top: 1.5rem;
+    border-top: 1px solid var(--rule);
+  }
+
+  .byline-text {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.72rem;
+    color: var(--ink-faint);
+    letter-spacing: 0.05em;
+  }
+
+  .byline-text strong {
+    color: var(--ink);
+    font-weight: 600;
+  }
+
+  .byline-sep { color: var(--rule); }
+
+  /* ── LAYOUT ── */
+  .container {
+    max-width: 740px;
+    margin: 0 auto;
+    padding: 0 2rem;
+  }
+
+  /* ── ARTICLE ── */
+  article {
+    padding: 3.5rem 0;
+  }
+
+  /* ── LEAD ── */
+  .lead {
+    font-size: 1.18rem;
+    font-weight: 400;
+    color: var(--ink);
+    line-height: 1.85;
+    margin-bottom: 2.5rem;
+    padding-bottom: 2.5rem;
+    border-bottom: 1px solid var(--rule);
+  }
+
+  .lead::first-letter {
+    font-family: 'Playfair Display', serif;
+    font-size: 4.5rem;
+    font-weight: 700;
+    float: left;
+    line-height: 0.75;
+    margin-right: 0.1em;
+    margin-top: 0.12em;
+    color: var(--accent);
+  }
+
+  /* ── PROSE ── */
+  p {
+    margin-bottom: 1.4rem;
+    color: var(--ink);
+  }
+
+  h2 {
+    font-family: 'Playfair Display', serif;
+    font-size: 1.75rem;
+    font-weight: 700;
+    color: var(--ink);
+    margin-top: 3.5rem;
+    margin-bottom: 1rem;
+    letter-spacing: -0.01em;
+    line-height: 1.2;
+  }
+
+  h2::before {
+    content: '§';
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.75rem;
+    color: var(--accent);
+    display: block;
+    margin-bottom: 0.4rem;
+    letter-spacing: 0.1em;
+  }
+
+  h3 {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.8rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-light);
+    margin-top: 2.5rem;
+    margin-bottom: 0.8rem;
+  }
+
+  strong { font-weight: 600; color: var(--ink); }
+  em { font-style: italic; }
+
+  /* ── INLINE CODE ── */
+  code {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.82em;
+    background: var(--paper-warm);
+    border: 1px solid var(--rule);
+    border-radius: 2px;
+    padding: 0.1em 0.35em;
+    color: var(--accent);
+  }
+
+  /* ── CODE BLOCKS ── */
+  .code-block {
+    margin: 2rem 0;
+    border-radius: 4px;
+    overflow: hidden;
+    border: 1px solid #313244;
+  }
+
+  .code-header {
+    background: #181825;
+    padding: 0.5rem 1rem;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid #313244;
+  }
+
+  .code-lang {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.65rem;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--code-comment);
+  }
+
+  .code-dots {
+    display: flex;
+    gap: 0.35rem;
+  }
+
+  .code-dots span {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #313244;
+  }
+
+  pre {
+    background: var(--code-bg);
+    padding: 1.25rem 1.5rem;
+    overflow-x: auto;
+    margin: 0;
+    line-height: 1.65;
+  }
+
+  pre code {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.8rem;
+    background: none;
+    border: none;
+    padding: 0;
+    color: var(--code-fg);
+  }
+
+  .t-green { color: var(--code-green); }
+  .t-yellow { color: var(--code-yellow); }
+  .t-red { color: var(--code-red); }
+  .t-blue { color: var(--code-blue); }
+  .t-comment { color: var(--code-comment); font-style: italic; }
+  .t-string { color: var(--code-yellow); }
+
+  /* ── METRICS BOX ── */
+  .metrics-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1px;
+    background: var(--rule);
+    border: 1px solid var(--rule);
+    margin: 2rem 0;
+    border-radius: 4px;
+    overflow: hidden;
+  }
+
+  .metric-cell {
+    background: var(--paper);
+    padding: 1.25rem 1.5rem;
+  }
+
+  .metric-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.65rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin-bottom: 0.4rem;
+  }
+
+  .metric-value {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 1.6rem;
+    font-weight: 600;
+    color: var(--ink);
+    line-height: 1;
+  }
+
+  .metric-unit {
+    font-size: 0.75rem;
+    font-weight: 400;
+    color: var(--ink-faint);
+    margin-left: 0.2em;
+  }
+
+  .metric-context {
+    font-size: 0.78rem;
+    color: var(--ink-faint);
+    margin-top: 0.3rem;
+    font-style: italic;
+  }
+
+  .metric-cell.accent {
+    background: var(--accent-soft);
+  }
+
+  .metric-cell.accent .metric-value {
+    color: var(--accent);
+  }
+
+  /* ── CALLOUT ── */
+  .callout {
+    border-left: 3px solid var(--accent);
+    padding: 1.2rem 1.5rem;
+    margin: 2rem 0;
+    background: var(--paper-warm);
+  }
+
+  .callout-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.65rem;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--accent);
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+  }
+
+  .callout p {
+    margin-bottom: 0;
+    font-size: 0.95rem;
+    color: var(--ink-light);
+  }
+
+  /* ── COMPARISON TABLE ── */
+  .data-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 2rem 0;
+    font-size: 0.88rem;
+  }
+
+  .data-table th {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.65rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    font-weight: 600;
+    padding: 0.6rem 1rem;
+    text-align: left;
+    border-bottom: 2px solid var(--ink);
+  }
+
+  .data-table td {
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid var(--rule);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.82rem;
+    color: var(--ink);
+  }
+
+  .data-table tr:last-child td { border-bottom: none; }
+
+  .data-table tr.highlight td {
+    background: var(--paper-warm);
+    font-weight: 600;
+  }
+
+  .data-table td.winner {
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  /* ── DIAGRAM ── */
+  .diagram {
+    background: var(--code-bg);
+    border-radius: 4px;
+    padding: 1.5rem 2rem;
+    margin: 2rem 0;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.78rem;
+    line-height: 1.9;
+    color: var(--code-fg);
+    overflow-x: auto;
+    border: 1px solid #313244;
+  }
+
+  .diagram .d-accent { color: var(--code-yellow); }
+  .diagram .d-green { color: var(--code-green); }
+  .diagram .d-red { color: var(--code-red); }
+  .diagram .d-blue { color: var(--code-blue); }
+  .diagram .d-comment { color: var(--code-comment); font-style: italic; }
+
+  /* ── PULL QUOTE ── */
+  blockquote {
+    margin: 3rem 0;
+    padding: 0 2rem;
+    border-left: none;
+    position: relative;
+  }
+
+  blockquote::before {
+    content: '\201C';
+    font-family: 'Playfair Display', serif;
+    font-size: 5rem;
+    color: var(--rule);
+    position: absolute;
+    left: -0.5rem;
+    top: -1.5rem;
+    line-height: 1;
+  }
+
+  blockquote p {
+    font-family: 'Playfair Display', serif;
+    font-size: 1.35rem;
+    font-style: italic;
+    line-height: 1.5;
+    color: var(--ink);
+    margin-bottom: 0.5rem;
+  }
+
+  blockquote cite {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.72rem;
+    color: var(--ink-faint);
+    font-style: normal;
+    letter-spacing: 0.05em;
+  }
+
+  /* ── SECTION DIVIDER ── */
+  .section-rule {
+    border: none;
+    border-top: 1px solid var(--rule);
+    margin: 3.5rem 0;
+  }
+
+  /* ── FOOTER ── */
+  footer {
+    border-top: 3px solid var(--ink);
+    padding: 2.5rem 0;
+    margin-top: 2rem;
+  }
+
+  .footer-inner {
+    max-width: 740px;
+    margin: 0 auto;
+    padding: 0 2rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 2rem;
+  }
+
+  .footer-col h4 {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.65rem;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin-bottom: 0.6rem;
+  }
+
+  .footer-col p {
+    font-size: 0.85rem;
+    color: var(--ink-light);
+    margin-bottom: 0.3rem;
+  }
+
+  .footer-col a {
+    color: var(--accent);
+    text-decoration: none;
+  }
+
+  .next-up {
+    background: var(--paper-warm);
+    border: 1px solid var(--rule);
+    padding: 1.5rem;
+    border-radius: 4px;
+    max-width: 340px;
+  }
+
+  .next-up-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.62rem;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 0.5rem;
+  }
+
+  .next-up h4 {
+    font-family: 'Playfair Display', serif;
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--ink);
+    margin-bottom: 0.4rem;
+    letter-spacing: 0;
+    text-transform: none;
+  }
+
+  .next-up p {
+    font-size: 0.82rem;
+    color: var(--ink-light);
+    margin-bottom: 0;
+  }
+
+  /* ── RESPONSIVE ── */
+  @media (max-width: 600px) {
+    html { font-size: 16px; }
+    h1 { font-size: 2rem; }
+    .metrics-grid { grid-template-columns: 1fr; }
+    .footer-inner { flex-direction: column; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-inner">
+    <span class="series-tag">LLM Infrastructure · Week 1 Lab Notes</span>
+    <h1>Measuring LLM Inference From First Principles</h1>
+    <p class="subtitle">
+      TTFT, TPOT, KV cache pressure, and continuous batching — observed live on
+      an M4 Mac Mini with vllm-metal, Prometheus, and a healthy sense of
+      curiosity about what actually happens between prompt and token.
+    </p>
+    <div class="byline">
+      <div class="byline-text">
+        <strong>Karthika Raghavan</strong>
+        <span class="byline-sep"> · </span>
+        Senior SRE → LLM Infrastructure Engineer
+        <span class="byline-sep"> · </span>
+        April 2026
+      </div>
+    </div>
+  </div>
+</header>
+
+<article>
+<div class="container">
+
+<p class="lead">
+  I spent a week running inference experiments on my M4 Mac Mini — not to build
+  a product, but to understand what actually happens inside an LLM serving stack.
+  TTFT. TPOT. KV cache. Continuous batching. These are words I had read in
+  papers. This week I measured them. Here is what I found.
+</p>
+
+<h2>The Setup</h2>
+
+<p>
+  I used <strong>vllm-metal</strong>, the official Apple Silicon plugin for vLLM,
+  serving <strong>Qwen3-0.6B-4bit</strong> — a 400MB 4-bit quantized model from
+  HuggingFace's mlx-community. Small enough to run comfortably inside 16GB of
+  unified memory, fast enough to produce measurable signal.
+</p>
+
+<p>
+  vLLM exposes a Prometheus-compatible <code>/metrics</code> endpoint. I wired
+  that into a Docker Compose stack running Prometheus and Grafana on the same
+  machine — the same observability pattern I already use for
+  <a href="https://github.com/kraghavan/inference-sentinel">inference-sentinel</a>.
+  Everything was visible in real time as I ran experiments.
+</p>
+
+<div class="code-block">
+  <div class="code-header">
+    <span class="code-lang">bash · startup</span>
+    <div class="code-dots"><span></span><span></span><span></span></div>
+  </div>
+  <pre><code><span class="t-comment"># One-liner install for vllm-metal (Apple Silicon)</span>
+curl -fsSL https://raw.githubusercontent.com/vllm-project/vllm-metal/main/install.sh | bash
+source ~/.venv-vllm-metal/bin/activate
+
+<span class="t-comment"># Serve the model — OpenAI-compatible API on :8000</span>
+vllm serve mlx-community/Qwen3-0.6B-4bit --port 8000
+
+<span class="t-green"># INFO: Platform plugin metal is activated</span>
+<span class="t-green"># INFO: Uvicorn running on http://0.0.0.0:8000</span></code></pre>
+</div>
+
+<hr class="section-rule">
+
+<h2>Understanding the Inference Pipeline</h2>
+
+<p>
+  Before I looked at a single number, I needed to understand what I was measuring.
+  Every LLM inference request has two fundamentally different phases, each with
+  its own compute profile:
+</p>
+
+<div class="diagram">
+  <span class="d-comment">── PREFILL PHASE ──────────────────────────────────────────────────────</span><br>
+  Input: <span class="d-accent">"What is KV cache in LLM inference?"</span> <span class="d-comment">← entire prompt</span><br>
+  Operation: All prompt tokens processed <span class="d-accent">in parallel</span> → one big matrix multiply<br>
+  Compute profile: <span class="d-blue">Compute-bound</span> — lots of FLOPs, fast on GPUs<br>
+  Output: KV cache populated for all prompt tokens<br>
+  Metric: <span class="d-green">TTFT</span> — Time To First Token<br><br>
+  <span class="d-comment">── DECODE PHASE ───────────────────────────────────────────────────────</span><br>
+  Input: Last generated token + entire KV cache<br>
+  Operation: One token generated <span class="d-accent">per step</span> → sequential, tiny matrix multiply<br>
+  Compute profile: <span class="d-red">Memory-bandwidth-bound</span> — must load full KV cache each step<br>
+  Output: One token → streamed to client → repeat until done<br>
+  Metric: <span class="d-green">TPOT</span> — Time Per Output Token
+</div>
+
+<p>
+  These two phases have completely different resource requirements. Prefill is
+  compute-hungry but parallelisable. Decode is sequential and memory-bandwidth
+  limited. Running them on the same hardware, in the same process, is the
+  fundamental inefficiency that P/D disaggregation — what I will study in
+  Week 2 — exists to fix.
+</p>
+
+<hr class="section-rule">
+
+<h2>Experiment 1 — Measuring TTFT and TPOT Directly</h2>
+
+<p>
+  I wrote a Python script that streams a response and timestamps the first token
+  arrival separately from the inter-token intervals. Here is the core measurement
+  logic:
+</p>
+
+<div class="code-block">
+  <div class="code-header">
+    <span class="code-lang">python · measure_latency.py</span>
+    <div class="code-dots"><span></span><span></span><span></span></div>
+  </div>
+  <pre><code><span class="t-blue">def</span> <span class="t-green">measure_streaming</span>(prompt, max_tokens=100):
+    start = time.perf_counter()
+    first_token_time = <span class="t-blue">None</span>
+    token_times = []
+
+    <span class="t-comment"># Stream the response — each SSE chunk = one decoded token</span>
+    <span class="t-blue">with</span> client.stream(<span class="t-string">"POST"</span>, <span class="t-string">"/v1/chat/completions"</span>, json=payload) <span class="t-blue">as</span> resp:
+        <span class="t-blue">for</span> line <span class="t-blue">in</span> resp.iter_lines():
+            <span class="t-blue">if</span> content := parse_token(line):
+                now = time.perf_counter()
+                <span class="t-blue">if</span> first_token_time <span class="t-blue">is None</span>:
+                    first_token_time = now  <span class="t-comment"># ← TTFT captured here</span>
+                token_times.append(now)
+
+    <span class="t-comment"># TPOT = average gap between consecutive tokens</span>
+    intervals = [token_times[i] - token_times[i-1]
+                 <span class="t-blue">for</span> i <span class="t-blue">in</span> range(1, len(token_times))]
+    avg_tpot = sum(intervals) / len(intervals)</code></pre>
+</div>
+
+<p>
+  I ran this against two prompts: a short one ("What is 2+2?") and a long one —
+  a 500-token document summarisation task. The results were immediately
+  instructive:
+</p>
+
+<div class="metrics-grid">
+  <div class="metric-cell">
+    <div class="metric-label">TTFT — Short Prompt</div>
+    <div class="metric-value">341<span class="metric-unit">ms</span></div>
+    <div class="metric-context">~20 input tokens</div>
+  </div>
+  <div class="metric-cell accent">
+    <div class="metric-label">TTFT — Long Prompt</div>
+    <div class="metric-value">487<span class="metric-unit">ms</span></div>
+    <div class="metric-context">~500 input tokens → 42% slower</div>
+  </div>
+  <div class="metric-cell">
+    <div class="metric-label">TPOT — Short Prompt</div>
+    <div class="metric-value">3.4<span class="metric-unit">ms</span></div>
+    <div class="metric-context">≈ 294 tok/s decode throughput</div>
+  </div>
+  <div class="metric-cell">
+    <div class="metric-label">TPOT — Long Prompt</div>
+    <div class="metric-value">4.2<span class="metric-unit">ms</span></div>
+    <div class="metric-context">barely changed — decode is independent</div>
+  </div>
+</div>
+
+<p>
+  The asymmetry is the point. TTFT increased by 42% when the prompt got 25x
+  longer — more tokens to process in parallel during prefill. But TPOT barely
+  moved (3.4ms → 4.2ms) because decode generates one token at a time regardless
+  of prompt length. Once the model starts generating, the input is already in
+  the KV cache and irrelevant to decode speed.
+</p>
+
+<blockquote>
+  <p>TPOT is determined by model size and hardware bandwidth. TTFT is determined by how long your user made their prompt.</p>
+  <cite>— what the numbers told me</cite>
+</blockquote>
+
+<hr class="section-rule">
+
+<h2>Experiment 2 — Prefix Cache in Action</h2>
+
+<p>
+  KV cache stores the computed key-value tensors for each token so they do not
+  need to be recomputed on subsequent steps. <strong>Prefix caching</strong>
+  extends this across requests: if two requests share the same system prompt,
+  the second request can reuse the KV cache blocks from the first rather than
+  recomputing the entire prompt from scratch.
+</p>
+
+<p>
+  I tested this by sending three requests with an identical 50-repetition system
+  prompt, measuring TTFT for each:
+</p>
+
+<div class="code-block">
+  <div class="code-header">
+    <span class="code-lang">python · prefix_cache_test.py</span>
+    <div class="code-dots"><span></span><span></span><span></span></div>
+  </div>
+  <pre><code>SYSTEM_PROMPT = <span class="t-string">"You are a helpful assistant. "</span> * 50  <span class="t-comment"># long shared prefix</span>
+
+<span class="t-comment"># First request — cold KV cache, full prefill required</span>
+chat(<span class="t-string">"What is 2+2?"</span>,   <span class="t-string">"First request (cold cache)"</span>)
+<span class="t-comment"># Second request — same system prompt, blocks reused from cache</span>
+chat(<span class="t-string">"What is 3+3?"</span>,   <span class="t-string">"Second request (warm cache)"</span>)
+<span class="t-comment"># Third request — same again</span>
+chat(<span class="t-string">"What is 4+4?"</span>,   <span class="t-string">"Third request (warmer cache)"</span>)</code></pre>
+</div>
+
+<div class="metrics-grid">
+  <div class="metric-cell accent">
+    <div class="metric-label">Cold Cache (Request 1)</div>
+    <div class="metric-value">753<span class="metric-unit">ms</span></div>
+    <div class="metric-context">Full prefill — all tokens computed</div>
+  </div>
+  <div class="metric-cell">
+    <div class="metric-label">Warm Cache (Request 2)</div>
+    <div class="metric-value">367<span class="metric-unit">ms</span></div>
+    <div class="metric-context">51% reduction — prefix blocks reused</div>
+  </div>
+  <div class="metric-cell">
+    <div class="metric-label">Warmer Cache (Request 3)</div>
+    <div class="metric-value">364<span class="metric-unit">ms</span></div>
+    <div class="metric-context">Marginal — cache already saturated</div>
+  </div>
+  <div class="metric-cell">
+    <div class="metric-label">Cache Hit Ratio (full session)</div>
+    <div class="metric-value">17.7<span class="metric-unit">%</span></div>
+    <div class="metric-context">304 hits / 1715 queries from /metrics</div>
+  </div>
+</div>
+
+<p>
+  A 51% TTFT reduction on the second request. The user asking a follow-up
+  question on the same conversation gets their first token in half the time.
+  This is why llm-d's EPP scheduler routes requests with shared system prompts
+  to the same decode pod — to maximise KV cache reuse at the cluster level.
+</p>
+
+<div class="callout">
+  <div class="callout-label">Why this matters for llm-d Week 2</div>
+  <p>
+    The prefix-cache-aware scorer in the EPP assigns a higher score to pods that
+    already hold relevant KV cache blocks for an incoming request. What I measured
+    locally as a 51% TTFT reduction — that is the per-request benefit the EPP
+    is trying to maximise at cluster scale across dozens of decode pods.
+  </p>
+</div>
+
+<hr class="section-rule">
+
+<h2>Experiment 3 — KV Cache Pressure Under Concurrent Load</h2>
+
+<p>
+  I sent four concurrent requests, each asking for 500 output tokens — a
+  deliberate attempt to fill the KV cache and observe how continuous batching
+  handles memory pressure.
+</p>
+
+<div class="code-block">
+  <div class="code-header">
+    <span class="code-lang">python · kv_pressure.py</span>
+    <div class="code-dots"><span></span><span></span><span></span></div>
+  </div>
+  <pre><code><span class="t-comment"># 4 concurrent requests, 500 tokens each</span>
+<span class="t-blue">with</span> ThreadPoolExecutor(max_workers=4) <span class="t-blue">as</span> ex:
+    futures = [ex.submit(send_long_request, i) <span class="t-blue">for</span> i <span class="t-blue">in</span> range(4)]
+
+<span class="t-comment"># Result:</span>
+<span class="t-green">Request 0: 500 tokens in 24.9s (20.1 tok/s)</span>
+<span class="t-green">Request 1: 500 tokens in 24.9s (20.1 tok/s)</span>
+<span class="t-green">Request 2: 500 tokens in 24.9s (20.1 tok/s)</span>
+<span class="t-green">Request 3: 500 tokens in 24.9s (20.1 tok/s)</span></code></pre>
+</div>
+
+<p>
+  All four requests completed at <strong>exactly the same time</strong>. This is
+  continuous batching working correctly. Sequential processing would have taken
+  approximately 4 × 24.9s ≈ 100 seconds. Instead they all finished in 24.9s —
+  the model processed all four sequences in parallel during each decode step.
+</p>
+
+<p>
+  In Grafana, <code>vllm:kv_cache_usage_perc</code> climbed to 4% during this
+  test — modest for a 0.6B model. On a 70B model with longer sequences, this
+  same pattern pushes KV cache utilisation toward the 85% danger threshold where
+  evictions begin and latency spikes.
+</p>
+
+<hr class="section-rule">
+
+<h2>Experiment 4 — Load Testing: TTFT Degradation Under Pressure</h2>
+
+<p>
+  I used Locust to simulate concurrent users sending a mixed workload of short
+  and long prompts. The Grafana dashboard made the degradation pattern immediately
+  visible.
+</p>
+
+<div class="diagram">
+  <span class="d-comment">── LOCUST SESSION (5 users, mixed short + long prompts) ──────────────</span><br><br>
+  <span class="d-blue">short_prompt</span>  avg=<span class="d-green">9,471ms</span>  min=710ms  p50=<span class="d-yellow">1,900ms</span>  max=23,219ms<br>
+  <span class="d-blue">long_prompt</span>   avg=<span class="d-red">16,830ms</span>  min=3,152ms  p50=<span class="d-red">31,000ms</span>  max=30,508ms<br><br>
+  <span class="d-comment">── KEY OBSERVATION ──────────────────────────────────────────────────</span><br>
+  Long prompt p50 latency: <span class="d-red">31 seconds</span><br>
+  Under concurrent load, long prompts queue behind each other.<br>
+  Each long prompt blocks the decode queue while it runs prefill.<br><br>
+  <span class="d-comment">This is the problem P/D disaggregation solves.</span>
+</div>
+
+<p>
+  The 31-second p50 for long prompts is not a hardware limitation — it is a
+  scheduling limitation. When aggregated serving forces prefill and decode to
+  share the same process, a long prefill blocks all decode operations behind
+  it in the queue. Every user waiting for a short response is queued behind
+  whoever submitted the long document.
+</p>
+
+<blockquote>
+  <p>The queue is the bottleneck, not the GPU. The GPU is fast. The waiting is what kills latency.</p>
+  <cite>— what Grafana's num_requests_waiting panel told me</cite>
+</blockquote>
+
+<hr class="section-rule">
+
+<h2>Experiment 5 — vllm-metal vs Ollama Under Load</h2>
+
+<p>
+  I benchmarked vllm-metal against Ollama using vegeta at a sustained 3 req/s
+  over 30 seconds. The primary comparison is
+  <strong>Ollama qwen2.5:0.5b vs vllm-metal Qwen3-0.6B-4bit</strong> — same
+  model family, same approximate parameter count, different serving engines.
+  Mistral 7B is included for reference but is not a fair size comparison.
+</p>
+
+<table class="data-table">
+  <thead>
+    <tr>
+      <th>Engine</th>
+      <th>Model</th>
+      <th>p50</th>
+      <th>p95</th>
+      <th>Min</th>
+      <th>Success</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Ollama</td>
+      <td>mistral 7B <em style="font-size:0.75em;color:var(--ink-faint)">(reference only — 10× larger)</em></td>
+      <td>15,979ms</td>
+      <td>26,896ms</td>
+      <td>5,157ms</td>
+      <td>100%</td>
+    </tr>
+    <tr>
+      <td>Ollama</td>
+      <td>qwen2.5:0.5b <em style="font-size:0.75em;color:var(--ink-faint)">(primary comparison)</em></td>
+      <td>14,062ms</td>
+      <td>20,012ms</td>
+      <td>2,569ms</td>
+      <td>100%</td>
+    </tr>
+    <tr>
+      <td>Ollama</td>
+      <td>qwen3.5 (large)</td>
+      <td>timeout</td>
+      <td>timeout</td>
+      <td>13,039ms</td>
+      <td>2.2%</td>
+    </tr>
+    <tr class="highlight">
+      <td>vllm-metal</td>
+      <td>Qwen3-0.6B-4bit <em style="font-size:0.75em;color:var(--ink-faint)">(primary comparison)</em></td>
+      <td class="winner">6,543ms</td>
+      <td class="winner">10,952ms</td>
+      <td class="winner">974ms</td>
+      <td>100%</td>
+    </tr>
+  </tbody>
+</table>
+
+<p>
+  Against the same-size Ollama model, vllm-metal is <strong>2.15× faster at
+  p50</strong> (6,543ms vs 14,062ms) and <strong>1.83× faster at p95</strong>
+  (10,952ms vs 20,012ms). The minimum latency of 974ms — sub-second — is the
+  clearest signal: when the server is not saturated, continuous batching
+  delivers a first response before Ollama has even started processing. Ollama's
+  2.5 second minimum reflects its sequential model: each request waits for
+  the previous one to complete before the GPU is available.
+</p>
+
+<p>
+  The qwen3.5 failure (2.2% success rate) is instructive. A larger model under
+  3 req/s causes Ollama's queue to back up until clients time out. vllm-metal
+  handles the same rate at 100% success because it batches multiple requests
+  into each GPU forward pass rather than serialising them.
+</p>
+
+<hr class="section-rule">
+
+<h2>What Grafana Showed Me</h2>
+
+<p>
+  Three panels in the vLLM Grafana dashboard were most revealing during the
+  load tests. Each tells a different part of the story:
+</p>
+
+<h3>Scheduler State — num_requests_running vs num_requests_waiting</h3>
+
+<p>
+  <code>num_requests_running</code> is your batch size — how many sequences are
+  being actively processed in this decode step. <code>num_requests_waiting</code>
+  is your queue depth — how many requests are sitting idle waiting for a GPU
+  slot. During load tests I saw waiting spike to 3-5 simultaneously, which
+  corresponded directly to TTFT degradation in the TTFT panel.
+</p>
+
+<h3>Requests Prefill and Decode Time</h3>
+
+<p>
+  This panel shows prefill time and decode time as separate metrics on the same
+  chart. What immediately jumped out: prefill time varies enormously with prompt
+  length, while decode time stays relatively flat. This is the visual
+  confirmation of everything the measure_latency.py numbers suggested. In a
+  disaggregated setup, these two lines would come from separate pod pools —
+  each independently scalable.
+</p>
+
+<h3>Cache Utilisation</h3>
+
+<p>
+  On a 0.6B model with short prompts, KV cache utilisation peaked at 4% during
+  the kv_pressure test. This headroom is the entire reason a small model can
+  handle concurrent load comfortably. The moment KV cache exceeds 85-90%, vLLM
+  begins evicting blocks from running sequences — those sequences must then be
+  preempted and re-prefilled, which sends TTFT through the roof.
+</p>
+
+<div class="callout">
+  <div class="callout-label">The metric name gotcha</div>
+  <p>
+    The official vLLM Grafana dashboard references <code>gpu_cache_usage_perc</code>
+    but vllm-metal exposes <code>kv_cache_usage_perc</code>. If your KV cache
+    panel shows "No data", fix the PromQL query. I confirmed the correct metric
+    name by reading <code>curl localhost:8000/metrics | grep cache</code> directly.
+  </p>
+</div>
+
+<hr class="section-rule">
+
+<h2>Experiment 6 — The K8s Gateway Pattern</h2>
+
+<p>
+  The final experiment of Week 1 was not about inference performance — it was
+  about topology. I deployed a <strong>kind cluster</strong> (Kubernetes in
+  Docker) and placed an nginx pod in front of vllm-metal to simulate the
+  position that Envoy occupies in a production llm-d cluster. The goal: send
+  an inference request through a real K8s Service and NodePort before I do
+  the same thing on cloud GPU in Week 2.
+</p>
+
+<h3>The Architecture</h3>
+
+<div class="diagram">
+  <span class="d-comment">── LOCAL SETUP (Apple Silicon constraint) ───────────────────────────</span><br><br>
+  curl localhost:9000<br>
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;│<br>
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;▼ <span class="d-comment">host port 9000 → kind NodePort 30000</span><br>
+  nginx pod :80 &nbsp;&nbsp;<span class="d-comment">← simulates Envoy gateway position in llm-d</span><br>
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;│<br>
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;▼ <span class="d-yellow">proxy_pass http://172.19.0.1:8000</span><br>
+  vllm-metal &nbsp;&nbsp;&nbsp;&nbsp;<span class="d-comment">← running natively on Mac host (Metal GPU)</span><br><br>
+  <span class="d-comment">── PRODUCTION (Week 2 — real GPU) ──────────────────────────────────</span><br><br>
+  curl gateway:80<br>
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;│<br>
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;▼<br>
+  Envoy gateway pod &nbsp;<span class="d-comment">← EPP does KV-cache-aware routing here</span><br>
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;│<br>
+  &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;▼<br>
+  vLLM pod &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<span class="d-green">← FastAPI server + GPU inside the pod</span>
+</div>
+
+<p>
+  The local version is an artificial two-hop — Metal GPU cannot be passed
+  through to Docker containers, so vllm-metal must run on the host. But the
+  <em>topology lesson</em> is identical: the gateway pod intercepts every
+  request before it reaches the inference engine. In production, that gateway
+  pod is Envoy running the EPP scorer. Here, it is nginx running a
+  <code>proxy_pass</code>.
+</p>
+
+<h3>The IPv6 Gotcha</h3>
+
+<p>
+  The first attempt failed with nginx logging
+  <code>connect() failed (101: Network unreachable)</code>. The cause:
+  <code>host.docker.internal</code> inside kind on Apple Silicon resolves
+  to an IPv6 address, but vllm-metal only binds to IPv4. The fix was to
+  bypass the DNS name entirely and use the kind bridge gateway IP directly:
+</p>
+
+<div class="code-block">
+  <div class="code-header">
+    <span class="code-lang">bash · finding the correct host IP</span>
+    <div class="code-dots"><span></span><span></span><span></span></div>
+  </div>
+  <pre><code><span class="t-comment"># Get the IPv4 address of the Mac host as seen from inside kind</span>
+HOST_IP=$(docker inspect vllm-lab-control-plane \
+  --format <span class="t-string">'{{range .NetworkSettings.Networks}}{{.Gateway}}{{end}}'</span>)
+echo $HOST_IP
+<span class="t-green"># 172.19.0.1</span>
+
+<span class="t-comment"># nginx ConfigMap — use the IP directly, not host.docker.internal</span>
+proxy_pass http://172.19.0.1:8000;</code></pre>
+</div>
+
+<h3>The Result</h3>
+
+<p>
+  With the correct IP in the ConfigMap, the full request path worked end to end.
+  I then ran a vegeta load test through the gateway to measure what the proxy
+  layer costs:
+</p>
+
+<div class="metrics-grid">
+  <div class="metric-cell">
+    <div class="metric-label">p50 latency — via K8s gateway</div>
+    <div class="metric-value">232<span class="metric-unit">ms</span></div>
+    <div class="metric-context">localhost:9000 → kind → nginx → vllm-metal</div>
+  </div>
+  <div class="metric-cell">
+    <div class="metric-label">p95 latency — via K8s gateway</div>
+    <div class="metric-value">277<span class="metric-unit">ms</span></div>
+    <div class="metric-context">100% success at 3 req/s, 45 requests</div>
+  </div>
+  <div class="metric-cell accent">
+    <div class="metric-label">Min latency — via K8s gateway</div>
+    <div class="metric-value">163<span class="metric-unit">ms</span></div>
+    <div class="metric-context">max_tokens=20 — tiny inference, mostly proxy overhead</div>
+  </div>
+  <div class="metric-cell">
+    <div class="metric-label">Success rate</div>
+    <div class="metric-value">100<span class="metric-unit">%</span></div>
+    <div class="metric-context">45/45 requests — gateway adds no failures</div>
+  </div>
+</div>
+
+<p>
+  The 163ms minimum reflects the proxy traversal cost, not inference time —
+  max_tokens=20 on a 0.6B model generates tokens in tens of milliseconds.
+  The meaningful result is <strong>100% success at sustained rate</strong>.
+  The gateway adds overhead but is not a bottleneck and does not drop requests.
+</p>
+
+<div class="callout">
+  <div class="callout-label">What this proves for Week 2</div>
+  <p>
+    In production, Envoy adds single-digit milliseconds of gateway overhead —
+    it is purpose-built for high-throughput proxying. The nginx simulation
+    here adds more, but the structural lesson holds: a gateway layer in front
+    of vLLM does not meaningfully affect inference latency. What matters in
+    llm-d is the EPP's routing intelligence — prefix cache scoring, queue
+    depth scoring, KV utilisation scoring — not the proxy overhead itself.
+  </p>
+</div>
+
+<h2>The Connection to Week 2</h2>
+
+<p>
+  Everything I measured this week points to the same structural problem: in
+  aggregated serving, prefill and decode compete for the same resources.
+  Long prompts delay short ones. High-concurrency workloads cause cascading
+  TTFT degradation that no amount of hardware scaling can fully fix — because
+  the problem is architectural, not computational.
+</p>
+
+<div class="diagram">
+  <span class="d-comment">── AGGREGATED SERVING (what Week 1 showed) ──────────────────────────</span><br><br>
+  Request A (long prompt)  → [  prefill 487ms  ][  decode decode decode ...  ]<br>
+  Request B (short prompt) → [<span class="d-red">WAITING...</span>][  prefill 341ms  ][ decode ... ]<br>
+  Request C (short prompt) → [<span class="d-red">WAITING...............</span>][ prefill ][ decode ]<br><br>
+  <span class="d-comment">── P/D DISAGGREGATION (what Week 2 will fix) ────────────────────────</span><br><br>
+  Prefill pool: [ A-prefill ][ B-prefill ][ C-prefill ]  <span class="d-comment">← compute-bound</span><br>
+  Decode pool:  [ A-decode ][ B-decode ][ C-decode   ]  <span class="d-comment">← memory-bandwidth-bound</span><br><br>
+  <span class="d-green">Decode pool never blocks on prefill. TTFT stays consistent under load.</span>
+</div>
+
+<p>
+  In Week 2 I will deploy llm-d on a cloud GPU node — a Kubernetes-native
+  distributed inference stack that separates these phases into independent pod
+  pools. The EPP (Endpoint Picker Plugin) routes each request to the correct
+  pool, transfers KV cache between them via NIXL over RDMA, and maintains
+  prefix-cache-aware routing so warm cache pods get repeat system prompts.
+</p>
+
+<p>
+  The numbers I collected this week — TTFT 341ms vs 487ms, prefix cache 51%
+  reduction, 31-second long-prompt p50 under load — are my baseline. Week 2 is
+  the comparison.
+</p>
+
+<hr class="section-rule">
+
+<h2>Repository</h2>
+
+<p>
+  All scripts, Prometheus configuration, Grafana dashboard JSON, and the full
+  lab guide are in the
+  <a href="https://github.com/kraghavan/gpu-labs">gpu-labs</a> repository
+  under <code>week1-vllm/</code>. The Python scripts produce the same numbers
+  on any Apple Silicon Mac running vllm-metal — the lab is fully reproducible.
+</p>
+
+<p>
+  Next: Week 2 — llm-d on Vultr L40S, prefix-cache routing, P/D disaggregation,
+  EPP scheduler logs, and the TTFT comparison that should validate everything
+  measured here.
+</p>
+
+</div>
+</article>
+
+<footer>
+  <div class="footer-inner">
+    <div class="footer-col">
+      <h4>Author</h4>
+      <p><strong>Karthika Raghavan</strong></p>
+      <p>Senior SRE / LLM Infrastructure</p>
+      <p><a href="https://linkedin.com/in/karthikaraghavan">linkedin.com/in/karthikaraghavan</a></p>
+      <p><a href="https://github.com/kraghavan">github.com/kraghavan</a></p>
+    </div>
+    <div class="footer-col">
+      <h4>Series</h4>
+      <p>Part 1 of a structured two-week lab covering vLLM, llm-d, and distributed LLM inference on Kubernetes.</p>
+      <p style="margin-top:0.5rem;font-size:0.78rem;color:var(--ink-faint)">
+        Hardware: M4 Mac Mini 16GB · Model: Qwen3-0.6B-4bit · Engine: vllm-metal
+      </p>
+    </div>
+    <div class="next-up">
+      <div class="next-up-label">Up Next · Week 2</div>
+      <h4>P/D Disaggregation on Kubernetes with llm-d</h4>
+      <p>Deploying prefill and decode as separate pod pools on a cloud L40S GPU. EPP routing, NIXL KV transfer, and the TTFT comparison.</p>
+    </div>
+  </div>
+</footer>
+
+</body>
+</html>
