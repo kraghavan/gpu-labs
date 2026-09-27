@@ -1,0 +1,68 @@
+# STRETCH GOAL — not built out. Sketch only, do not run as-is.
+#
+# Base: the working values.yaml from Part 3 (Gotcha 4), bumped to a pinned
+# v0.30.0 image, with --load-format ipc_cache added to the decode container.
+#
+# Unresolved problem: the weight-cache daemon needs a Unix domain socket
+# reachable from the decode container. Options not yet evaluated:
+#   (a) daemon as an initContainer in the same pod, sharing an emptyDir
+#       volume for the socket path — daemon must exit/stay running
+#       correctly for initContainer semantics, which may not fit (daemon is
+#       long-lived, initContainers are expected to complete).
+#   (b) daemon as a sidecar container in the same pod (native sidecars,
+#       K8s 1.29+), sharing an emptyDir volume — more likely to work.
+#   (c) daemon as a DaemonSet on the GPU node, socket via hostPath — works
+#       across pod restarts without re-running the daemon, closer to the
+#       feature's intended one-daemon-per-GPU model, but ties the socket
+#       path to a specific node.
+#
+# Pick (c) if attempting this — it matches "one daemon per GPU" and doesn't
+# require getting sidecar container ordering right. Confirm against the
+# bare-metal result first; only worth the complexity if the timing win is
+# large enough to matter in the K8s/llm-d context specifically.
+
+multinode: false
+
+modelArtifacts:
+  uri: "hf://Qwen/Qwen3-0.6B"
+  name: "Qwen/Qwen3-0.6B"
+  size: 2Gi
+  authSecretName: "llm-d-hf-token"
+
+routing:
+  proxy:
+    enabled: false
+    targetPort: 8000
+
+accelerator:
+  type: nvidia
+
+decode:
+  create: true
+  parallelism:
+    tensor: 1
+    data: 1
+  replicas: 1
+  containers:
+    - name: "vllm"
+      image: vllm/vllm-openai:v0.30.0   # pin the version under test, don't use :latest
+      modelCommand: vllmServe
+      args:
+        - "--disable-uvicorn-access-log"
+        - "--gpu-memory-utilization=0.90"
+        - "--load-format=ipc_cache"   # requires the daemon socket to exist first — see notes above
+      ports:
+        - containerPort: 8000
+          name: vllm
+          protocol: TCP
+      volumeMounts:
+        - name: weight-cache-socket
+          mountPath: /var/run/vllm-weight-cache   # path is a guess — confirm actual socket path from daemon docs
+  volumes:
+    - name: weight-cache-socket
+      hostPath:
+        path: /var/run/vllm-weight-cache
+        type: DirectoryOrCreate
+
+prefill:
+  create: false
