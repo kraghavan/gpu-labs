@@ -1,0 +1,26 @@
+apiVersion: llmd.io/v1alpha1
+kind: PDRatioPolicy
+metadata:
+  name: validation
+  namespace: pd-validation
+spec:
+  gpuBudget: 4          # 4 replicas max total, shared physical GPU (see deployment YAML comments)
+
+  prefill:
+    deployment: prefill
+    min: 1
+    max: 3
+    queueDepthTrigger: 5
+    queueVelocityTrigger: 3
+    velocityWindowSeconds: 30
+
+  decode:
+    deployment: decode
+    min: 1
+    max: 2
+    tpotSLOMs: 80
+    kvCacheThreshold: "0.85"
+
+  cooldownSeconds: 60      # shorter than the 120s default — small model, fast pod startup, want faster test iteration
+  drainTimeoutSeconds: 20
+  prometheusURL: "http://prometheus.pd-validation:9090"

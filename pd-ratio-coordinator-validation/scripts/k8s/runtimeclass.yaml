@@ -1,0 +1,10 @@
+# Explicit per-pod GPU runtime selection, rather than forcing nvidia as the
+# cluster-wide default (which would also apply to Prometheus, which needs
+# no GPU access, and which caused a TOML conflict trying to redeclare
+# containerd's already-populated .containerd table to set
+# default_runtime_name). Only prefill and decode request this.
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: nvidia
+handler: nvidia

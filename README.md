@@ -17,3 +17,9 @@ open an issue or a PR.
   vLLM v0.30.0's Fast Start (weight-cache daemon + CUDA IPC restart) and
   text watermarking (Gumbel-max), measured on a Lambda Cloud A100 at two
   model sizes.
+- [`pd-ratio-coordinator-validation/`](./pd-ratio-coordinator-validation) —
+  validating a from-scratch Kubernetes operator ([pd-ratio-coordinator](https://github.com/kraghavan/pd-ratio-coordinator))
+  against real Prometheus metrics, real load, and real `kubectl scale`
+  actions, deliberately scoped to skip real P/D disaggregation — the
+  operator never inspects KV-transfer correctness, only metrics and
+  replica counts.
